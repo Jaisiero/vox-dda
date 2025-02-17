@@ -1,0 +1,17 @@
+{
+  "name": "vox-dda",
+  "version": "1.0.0",
+  "builtin-baseline": "cf035d9916a0a23042b41fcae7ee0386d245af08",
+  "dependencies": [
+    {
+      "name": "daxa",
+      "features": [
+        "utils-mem",
+        "utils-pipeline-manager-glslang",
+        "utils-pipeline-manager-slang",
+        "utils-task-graph"
+      ]
+    },
+    "glfw3"
+  ]
+}
