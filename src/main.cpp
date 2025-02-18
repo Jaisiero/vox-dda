@@ -2,11 +2,34 @@
 #include "shared.inl"
 #include <daxa/utils/pipeline_manager.hpp>
 #include <daxa/utils/task_graph.hpp>
+#include <random>
 
 #define SHADER_LANG_SLANG 1
 
-static daxa::u32 size_x = 860;
-static daxa::u32 size_y = 640;
+static const daxa::u32 size_x = 860;
+static const daxa::u32 size_y = 640;
+
+static void generate_voxels(u32 *voxels, u32 dim)
+{
+    std::random_device dev;
+    std::mt19937 rng(dev());
+    std::uniform_int_distribution<std::mt19937::result_type> dist(0, 1);
+
+    for (u32 z = 0; z < dim; ++z)
+    {
+        for (u32 y = 0; y < dim; ++y)
+        {
+            for (u32 x = 0; x < dim; ++x)
+            {
+                const auto i = z * dim * dim + y * dim + x;
+                const auto index = i >> 5;
+                const auto bit = i & 31;
+                // fill every bit one by one
+                voxels[index] |= dist(rng) << bit;
+            }
+        }
+    }
+}
 
 int main(int argc, char const *argv[])
 {
@@ -15,7 +38,7 @@ int main(int argc, char const *argv[])
 
     daxa::Instance instance = daxa::create_instance({});
 
-    daxa::DeviceInfo2 device_info = {.name = "my device"};
+    daxa::DeviceInfo2 device_info = {.name = "device"};
     
     daxa::Device device = instance.create_device_2(instance.choose_device({}, device_info));
 
@@ -39,7 +62,7 @@ int main(int argc, char const *argv[])
         },
         .present_mode = daxa::PresentMode::MAILBOX,
         .image_usage = daxa::ImageUsageFlagBits::TRANSFER_DST | daxa::ImageUsageFlagBits::SHADER_STORAGE,
-        .name = "my swapchain",
+        .name = "swapchain",
     });
 
     auto pipeline_manager = daxa::PipelineManager({
@@ -56,7 +79,7 @@ int main(int argc, char const *argv[])
 #endif
             .enable_debug_info = true,
         },
-        .name = "my pipeline manager",
+        .name = "pipeline manager",
     });
 
     // clang-format off
@@ -74,7 +97,7 @@ int main(int argc, char const *argv[])
 #endif
             },
             .push_constant_size = sizeof(ComputePush),
-            .name = "my pipeline",
+            .name = "compute pipeline",
         });
         if (result.is_err())
         {
@@ -84,25 +107,69 @@ int main(int argc, char const *argv[])
         compute_pipeline = result.value();
     }
 
-    daxa::TaskImage task_swapchain_image = {{.swapchain_image = true, .name = "swapchain image"}};
+    auto const voxel_dim = 8;
+    auto const voxel_size = voxel_dim * voxel_dim * voxel_dim; 
+    auto const voxel_buffer_size = voxel_size / sizeof(u32);
 
-    daxa::TaskGraph task_graph = daxa::TaskGraph({
+    auto voxel_buffer = device.create_buffer({
+        .size = voxel_buffer_size,
+        .allocate_info = daxa::MemoryFlagBits::DEDICATED_MEMORY,
+        .name = "voxel buffer",
+    });
+
+    daxa::TaskImage task_swapchain_image = {{.swapchain_image = true, .name = "swapchain image"}};
+    daxa::TaskBuffer task_voxel_buffer = {{.initial_buffers = {.buffers = std::array{voxel_buffer}}, .name = "voxel buffer"}};
+
+    auto task_graph_upload = daxa::TaskGraph({
+        .device = device,
+        .name = "task graph upload",
+    });
+
+    {
+        task_graph_upload.use_persistent_buffer(task_voxel_buffer);
+
+        task_graph_upload.add_task({
+            .attachments = {
+                daxa::inl_attachment(daxa::TaskBufferAccess::TRANSFER_WRITE, task_voxel_buffer),
+            },
+            .task = [task_voxel_buffer](daxa::TaskInterface ti)
+            {
+                auto staging = ti.allocator->allocate(voxel_buffer_size).value();
+                generate_voxels(reinterpret_cast<u32*>(staging.host_address), voxel_dim);
+                ti.recorder.copy_buffer_to_buffer({
+                    .src_buffer = ti.allocator->buffer(),
+                    .dst_buffer = ti.get(task_voxel_buffer).ids[0],
+                    .size = staging.size,
+                });
+            },
+            .name = "upload task",
+        });
+        task_graph_upload.submit({});
+        task_graph_upload.complete({});
+    }
+    task_graph_upload.execute({});
+
+
+    auto task_graph = daxa::TaskGraph({
         .device = device,
         .swapchain = swapchain,
-        .name = "my task graph",
+        .name = "task graph loop",
     });
     {
         task_graph.use_persistent_image(task_swapchain_image);
+        task_graph.use_persistent_buffer(task_voxel_buffer);
 
         task_graph.add_task({
             .attachments = {
                 daxa::inl_attachment(daxa::TaskImageAccess::COMPUTE_SHADER_STORAGE_READ_WRITE, task_swapchain_image),
+                daxa::inl_attachment(daxa::TaskBufferAccess::COMPUTE_SHADER_READ, task_voxel_buffer),
             },
-            .task = [compute_pipeline, task_swapchain_image](daxa::TaskInterface ti)
+            .task = [&window, compute_pipeline, task_swapchain_image, task_voxel_buffer](daxa::TaskInterface ti)
             {
                 auto p = ComputePush{
-                    .res = {size_x, size_y},
-                    .image_id = ti.get(task_swapchain_image).ids[0].default_view(),    
+                    .res = {window.width, window.height},
+                    .image_id = ti.get(task_swapchain_image).ids[0].default_view(),   
+                    .voxel_buffer = ti.get(task_voxel_buffer).ids[0], 
                 };
                 ti.recorder.set_pipeline(*compute_pipeline);
                 ti.recorder.push_constant(p);
@@ -118,6 +185,11 @@ int main(int argc, char const *argv[])
     while (!window.should_close()){
         window.update();
         pipeline_manager.reload_all();
+        
+        if (window.swapchain_out_of_date){
+            swapchain.resize();
+            window.swapchain_out_of_date = false;
+        }
 
         auto swapchain_image = swapchain.acquire_next_image();
         task_swapchain_image.set_images({.images = std::array{swapchain_image}});
@@ -131,6 +203,8 @@ int main(int argc, char const *argv[])
     }
     device.wait_idle();
     device.collect_garbage();
+
+    device.destroy_buffer(voxel_buffer);
 
     return 0;
 }
