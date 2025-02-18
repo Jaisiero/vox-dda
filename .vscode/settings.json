@@ -1,5 +1,11 @@
 {
     "files.associations": {
+        "*.rgen": "glsl",
+        "*.rchit": "glsl",
+        "*.rint": "glsl",
+        "*.rmiss": "glsl",
+        "*.shadercfg": "json",
+        "*.graphcfg": "json",
         "*.cpp": "cpp",
         "*.hpp": "cpp",
         "algorithm": "cpp",
@@ -87,6 +93,7 @@
         "xtree": "cpp",
         "xutility": "cpp",
         "*.slang": "cpp",
-        "*.glsl": "cpp"
+        "*.glsl": "cpp",
+        "random": "cpp"
     }
 }

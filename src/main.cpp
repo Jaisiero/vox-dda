@@ -3,11 +3,15 @@
 #include <daxa/utils/pipeline_manager.hpp>
 #include <daxa/utils/task_graph.hpp>
 #include <random>
+#include <cmath>
+
 
 #define SHADER_LANG_SLANG 1
 
-static const daxa::u32 size_x = 860;
-static const daxa::u32 size_y = 640;
+constexpr auto size_x = 860u;
+constexpr auto size_y = 640u;
+constexpr auto fov = 90.0f;
+constexpr auto camera_pos = daxa_f32vec3{0.0f, 0.0f, -50.0f};
 
 static void generate_voxels(u32 *voxels, u32 dim)
 {
@@ -117,6 +121,9 @@ int main(int argc, char const *argv[])
         .name = "voxel buffer",
     });
 
+    Camera camera = {camera_pos};
+    camera.calculate_camera_distance(fov);
+
     daxa::TaskImage task_swapchain_image = {{.swapchain_image = true, .name = "swapchain image"}};
     daxa::TaskBuffer task_voxel_buffer = {{.initial_buffers = {.buffers = std::array{voxel_buffer}}, .name = "voxel buffer"}};
 
@@ -164,16 +171,17 @@ int main(int argc, char const *argv[])
                 daxa::inl_attachment(daxa::TaskImageAccess::COMPUTE_SHADER_STORAGE_READ_WRITE, task_swapchain_image),
                 daxa::inl_attachment(daxa::TaskBufferAccess::COMPUTE_SHADER_READ, task_voxel_buffer),
             },
-            .task = [&window, compute_pipeline, task_swapchain_image, task_voxel_buffer](daxa::TaskInterface ti)
+            .task = [&window, compute_pipeline, task_swapchain_image, task_voxel_buffer, &camera](daxa::TaskInterface ti)
             {
                 auto p = ComputePush{
                     .res = {window.width, window.height},
+                    .cam = camera,
                     .image_id = ti.get(task_swapchain_image).ids[0].default_view(),   
                     .voxel_buffer = ti.get(task_voxel_buffer).ids[0], 
                 };
                 ti.recorder.set_pipeline(*compute_pipeline);
                 ti.recorder.push_constant(p);
-                ti.recorder.dispatch({.x = size_x / 8, .y = size_y / 4, .z = 1});
+                ti.recorder.dispatch({.x = window.width / 8, .y = window.height / 4, .z = 1});
             },
             .name = ("compute task"),
         });
