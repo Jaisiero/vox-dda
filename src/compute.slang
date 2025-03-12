@@ -13,7 +13,7 @@ struct RayDesc
 };
 
 // FIXME: pass this as a push constant or buffer
-static Aabb box = Aabb(float3(-3.0, -3.0, -3.0), float3(3.0, 3.0, 3.0));
+static Aabb box = Aabb(float3(-3.0, -3.0, -3.0), float3(3.0, 3.0, 3.0), float3(0.0));
 static PointLight light = PointLight(float3(5, 5, -5), float3(20, 20, 20));
 static AreaLight area_light = AreaLight(float3(0, 5, 0), float3(0, -1, 0), float3(20, 20, 20), float2(2, 2));
 
@@ -226,6 +226,9 @@ func sample_lambertian(float3 normal, float3 albedo, out float3 out_dir, out flo
             radiance += throughput * background;
             break;
         }
+
+        // add emissive light
+        radiance += throughput * box.emission;
 
         float3 hit_point = ray.origin + ray.direction * t;
         float3 normal = ComputeAabbNormal(hit_point, box);

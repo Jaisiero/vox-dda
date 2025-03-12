@@ -90,6 +90,7 @@ struct Aabb
 {
     daxa_f32vec3 min;
     daxa_f32vec3 max;
+    daxa_f32vec3 emission;
 
     daxa_f32vec3 center()
     {
