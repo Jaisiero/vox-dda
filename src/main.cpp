@@ -1,5 +1,4 @@
 #include "window.hpp"
-#include "camera.hpp"
 #include "shared.inl"
 #include <daxa/utils/pipeline_manager.hpp>
 #include <daxa/utils/task_graph.hpp>
@@ -128,8 +127,6 @@ int main(int argc, char const *argv[])
         .name = "camera buffer",
     });
 
-    Camera camera = {};
-
     daxa::TaskImage task_swapchain_image = {{.swapchain_image = true, .name = "swapchain image"}};
     daxa::TaskBuffer task_voxel_buffer = {{.initial_buffers = {.buffers = std::array{voxel_buffer}}, .name = "voxel buffer"}};
     daxa::TaskBuffer task_camera_buffer = {{.initial_buffers = {.buffers = std::array{camera_buffer}}, .name = "camera buffer"}};
@@ -144,7 +141,7 @@ int main(int argc, char const *argv[])
 
         task_graph_upload.add_task({
             .attachments = {
-                daxa::inl_attachment(daxa::TaskBufferAccess::TRANSFER_WRITE, task_voxel_buffer),
+                daxa::inl_attachment(daxa::TaskBufferAccess::WRITE, task_voxel_buffer),
             },
             .task = [task_voxel_buffer](daxa::TaskInterface ti)
             {
@@ -174,9 +171,11 @@ int main(int argc, char const *argv[])
         task_graph.use_persistent_buffer(task_voxel_buffer);
         task_graph.use_persistent_buffer(task_camera_buffer);
 
+        auto& camera = window.camera;
+
         task_graph.add_task({
             .attachments = {
-                daxa::inl_attachment(daxa::TaskBufferAccess::HOST_TRANSFER_WRITE, task_camera_buffer),
+                daxa::inl_attachment(daxa::TaskBufferAccess::TRANSFER_WRITE, task_camera_buffer),
             },
             .task = [&window, task_camera_buffer, &camera](daxa::TaskInterface ti)
             {
@@ -239,18 +238,19 @@ int main(int argc, char const *argv[])
         if (window.swapchain_out_of_date){
             swapchain.resize();
             window.swapchain_out_of_date = false;
+            std::cout << "Resized swapchain" << std::endl;
         }
 
         auto swapchain_image = swapchain.acquire_next_image();
         task_swapchain_image.set_images({.images = std::array{swapchain_image}});
-        if (swapchain_image.is_empty())
+        if (!swapchain_image.is_empty())
         {
-            break;
+            handle_reload_result(pipeline_manager.reload_all());
+    
+            // So, now all we need to do is execute our task graph!
+            task_graph.execute({});
+            device.collect_garbage();
         }
-        handle_reload_result(pipeline_manager.reload_all());
-
-        // So, now all we need to do is execute our task graph!
-        task_graph.execute({});
     }
     device.wait_idle();
     device.collect_garbage();
