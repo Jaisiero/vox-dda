@@ -115,6 +115,8 @@ int main(int argc, char const *argv[])
     auto const voxel_size = voxel_dim * voxel_dim * voxel_dim; 
     auto const voxel_buffer_size = voxel_size / sizeof(u32);
 
+    u64 frame_count = 0;
+
     auto voxel_buffer = device.create_buffer({
         .size = voxel_buffer_size,
         .allocate_info = daxa::MemoryFlagBits::DEDICATED_MEMORY,
@@ -141,7 +143,7 @@ int main(int argc, char const *argv[])
 
         task_graph_upload.add_task({
             .attachments = {
-                daxa::inl_attachment(daxa::TaskBufferAccess::WRITE, task_voxel_buffer),
+                daxa::inl_attachment(daxa::TaskBufferAccess::TRANSFER_WRITE, task_voxel_buffer),
             },
             .task = [task_voxel_buffer](daxa::TaskInterface ti)
             {
@@ -199,13 +201,14 @@ int main(int argc, char const *argv[])
                 daxa::inl_attachment(daxa::TaskBufferAccess::COMPUTE_SHADER_READ, task_voxel_buffer),
                 daxa::inl_attachment(daxa::TaskBufferAccess::COMPUTE_SHADER_READ, task_camera_buffer),
             },
-            .task = [&window, &device, compute_pipeline, task_swapchain_image, task_voxel_buffer, task_camera_buffer](daxa::TaskInterface ti)
+            .task = [&window, &device, compute_pipeline, task_swapchain_image, task_voxel_buffer, task_camera_buffer, &frame_count](daxa::TaskInterface ti)
             {
                 const auto width = window.width;
                 const auto height = window.height;
                 auto p = ComputePush{
                     .cam = device.device_address(ti.get(task_camera_buffer).ids[0]).value(),
                     .res = {width, height},
+                    .frame_count = frame_count++,
                     .swapchain = ti.get(task_swapchain_image).ids[0].default_view(),   
                     .voxel_buffer = ti.get(task_voxel_buffer).ids[0], 
                 };
