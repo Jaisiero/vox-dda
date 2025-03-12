@@ -4,7 +4,10 @@
 #include <daxa/utils/task_graph.hpp>
 #include <random>
 #include <cmath>
+#include <chrono>
+#include <thread>
 
+constexpr auto fixed_frame_duration = std::chrono::microseconds(6944); // ≈ 144 FPS
 
 #define SHADER_LANG_SLANG 1
 
@@ -236,6 +239,8 @@ int main(int argc, char const *argv[])
     };
 
     while (!window.should_close()){
+        auto frame_start = std::chrono::steady_clock::now();
+
         window.update();
         
         if (window.swapchain_out_of_date){
@@ -253,6 +258,13 @@ int main(int argc, char const *argv[])
             // So, now all we need to do is execute our task graph!
             task_graph.execute({});
             device.collect_garbage();
+        }
+
+        // Sleep to enforce FPS if the frame finished early.
+        auto frame_end = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(frame_end - frame_start);
+        if (elapsed < fixed_frame_duration) {
+            std::this_thread::sleep_for(fixed_frame_duration - elapsed);
         }
     }
     device.wait_idle();
