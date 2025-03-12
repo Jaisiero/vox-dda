@@ -94,6 +94,7 @@
         "xutility": "cpp",
         "*.slang": "cpp",
         "*.glsl": "cpp",
-        "random": "cpp"
+        "random": "cpp",
+        "cstdarg": "cpp"
     }
 }

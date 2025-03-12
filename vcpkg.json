@@ -12,6 +12,7 @@
         "utils-task-graph"
       ]
     },
-    "glfw3"
+    "glfw3",
+    "glm"
   ]
 }

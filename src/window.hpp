@@ -1,7 +1,7 @@
 #pragma once
 
 #include <daxa/daxa.hpp>
-// For things like `u32`. Not necessary of course.
+// types `u32`.
 using namespace daxa::types;
 
 #include <GLFW/glfw3.h>

@@ -1,4 +1,5 @@
 #include "window.hpp"
+#include "camera.hpp"
 #include "shared.inl"
 #include <daxa/utils/pipeline_manager.hpp>
 #include <daxa/utils/task_graph.hpp>
@@ -121,11 +122,17 @@ int main(int argc, char const *argv[])
         .name = "voxel buffer",
     });
 
-    Camera camera = {camera_pos};
-    camera.calculate_camera_distance(fov);
+    auto camera_buffer = device.create_buffer({
+        .size = sizeof(CameraView),
+        .allocate_info = daxa::MemoryFlagBits::DEDICATED_MEMORY,
+        .name = "camera buffer",
+    });
+
+    Camera camera = {};
 
     daxa::TaskImage task_swapchain_image = {{.swapchain_image = true, .name = "swapchain image"}};
     daxa::TaskBuffer task_voxel_buffer = {{.initial_buffers = {.buffers = std::array{voxel_buffer}}, .name = "voxel buffer"}};
+    daxa::TaskBuffer task_camera_buffer = {{.initial_buffers = {.buffers = std::array{camera_buffer}}, .name = "camera buffer"}};
 
     auto task_graph_upload = daxa::TaskGraph({
         .device = device,
@@ -165,23 +172,47 @@ int main(int argc, char const *argv[])
     {
         task_graph.use_persistent_image(task_swapchain_image);
         task_graph.use_persistent_buffer(task_voxel_buffer);
+        task_graph.use_persistent_buffer(task_camera_buffer);
+
+        task_graph.add_task({
+            .attachments = {
+                daxa::inl_attachment(daxa::TaskBufferAccess::HOST_TRANSFER_WRITE, task_camera_buffer),
+            },
+            .task = [&window, task_camera_buffer, &camera](daxa::TaskInterface ti)
+            {
+                const auto width = window.width;
+                const auto height = window.height;
+                camera.camera_set_aspect(width, height);
+                auto staging = ti.allocator->allocate(sizeof(CameraView)).value();
+                *reinterpret_cast<CameraView*>(staging.host_address) = {camera.get_inverse_view_matrix(), camera.get_inverse_projection_matrix(true)};
+                ti.recorder.copy_buffer_to_buffer({
+                    .src_buffer = ti.allocator->buffer(),
+                    .dst_buffer = ti.get(task_camera_buffer).ids[0],
+                    .size = staging.size,
+                });
+            },
+            .name = "upload camera task",
+        });
 
         task_graph.add_task({
             .attachments = {
                 daxa::inl_attachment(daxa::TaskImageAccess::COMPUTE_SHADER_STORAGE_READ_WRITE, task_swapchain_image),
                 daxa::inl_attachment(daxa::TaskBufferAccess::COMPUTE_SHADER_READ, task_voxel_buffer),
+                daxa::inl_attachment(daxa::TaskBufferAccess::COMPUTE_SHADER_READ, task_camera_buffer),
             },
-            .task = [&window, compute_pipeline, task_swapchain_image, task_voxel_buffer, &camera](daxa::TaskInterface ti)
+            .task = [&window, &device, compute_pipeline, task_swapchain_image, task_voxel_buffer, task_camera_buffer](daxa::TaskInterface ti)
             {
+                const auto width = window.width;
+                const auto height = window.height;
                 auto p = ComputePush{
-                    .res = {window.width, window.height},
-                    .cam = camera,
-                    .image_id = ti.get(task_swapchain_image).ids[0].default_view(),   
+                    .cam = device.device_address(ti.get(task_camera_buffer).ids[0]).value(),
+                    .res = {width, height},
+                    .swapchain = ti.get(task_swapchain_image).ids[0].default_view(),   
                     .voxel_buffer = ti.get(task_voxel_buffer).ids[0], 
                 };
                 ti.recorder.set_pipeline(*compute_pipeline);
                 ti.recorder.push_constant(p);
-                ti.recorder.dispatch({.x = window.width / 8, .y = window.height / 4, .z = 1});
+                ti.recorder.dispatch({.x = width / 8, .y = height / 4, .z = 1});
             },
             .name = ("compute task"),
         });
@@ -190,9 +221,20 @@ int main(int argc, char const *argv[])
         task_graph.complete({});
     };
 
+    auto handle_reload_result = [&](daxa::PipelineReloadResult reload_error) -> void
+    {
+        if (auto error = daxa::get_if<daxa::PipelineReloadError>(&reload_error))
+        {
+            std::cout << "Failed to reload " << error->message << std::endl;
+        }
+        else if (daxa::get_if<daxa::PipelineReloadSuccess>(&reload_error))
+        {
+            std::cout << "Successfully reloaded!" << std::endl;
+        }
+    };
+
     while (!window.should_close()){
         window.update();
-        pipeline_manager.reload_all();
         
         if (window.swapchain_out_of_date){
             swapchain.resize();
@@ -205,6 +247,7 @@ int main(int argc, char const *argv[])
         {
             break;
         }
+        handle_reload_result(pipeline_manager.reload_all());
 
         // So, now all we need to do is execute our task graph!
         task_graph.execute({});
@@ -213,6 +256,7 @@ int main(int argc, char const *argv[])
     device.collect_garbage();
 
     device.destroy_buffer(voxel_buffer);
+    device.destroy_buffer(camera_buffer);
 
     return 0;
 }
