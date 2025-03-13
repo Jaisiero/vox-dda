@@ -34,6 +34,18 @@ func RayAabbIntersection(Ray ray, Aabb box) -> float
     return tmax_min > max(tmin_max, 0.0f) ? tmin_max : -1.0f;
 }
 
+func ComputeBoxFaceNormal(float3 hit_point, float3 box_min, float3 box_max) -> float3
+{
+    float3 d = hit_point - BoxCenter(Aabb(box_min, box_max));
+    float3 abs_d = abs(d);
+    if (abs_d.x >= abs_d.y && abs_d.x >= abs_d.z)
+        return float3(sign(d.x), 0, 0);
+    else if (abs_d.y >= abs_d.z)
+        return float3(0, sign(d.y), 0);
+    else
+        return float3(0, 0, sign(d.z));
+}
+
 struct DDAHit {
     float t;
     float3 normal;
@@ -56,7 +68,7 @@ func DDATraverse(Ray ray, Aabb box, uint* voxel_buffer) -> DDAHit {
     }
 
     // Compute starting point inside the grid.
-    float3 pos = ray.origin + ray.direction * (t_entry );
+    float3 pos = ray.origin + ray.direction * (t_entry);
 
     // Determine initial voxel coordinates.
     int3 voxel;
@@ -103,28 +115,21 @@ func DDATraverse(Ray ray, Aabb box, uint* voxel_buffer) -> DDAHit {
         // Compute 1D index from 3D voxel coordinate.
         let index = voxel.z * grid_dim * grid_dim + voxel.y * grid_dim + voxel.x;
 
-        // Check occupancy: Here, assume nonzero means "filled".
+        // If the current voxel is occupied:
         if ((voxel_buffer[index >> 5] & (1u << (index & 31))) != 0) {
-             // Determine which tMax is minimal.
-             float hit_t_offset = min(tMax.x, min(tMax.y, tMax.z));
-             int hit_axis;
-             if (hit_t_offset == tMax.x) {
-                 hit_axis = 0;
-             } else if (hit_t_offset == tMax.y) {
-                 hit_axis = 1;
-             } else {
-                 hit_axis = 2;
-             }
- 
-             float3 hit_normal;
-             if (hit_axis == 0) {
-                 hit_normal = float3(-step.x, 0, 0);
-             } else if (hit_axis == 1) {
-                 hit_normal = float3(0, -step.y, 0);
-             } else {
-                 hit_normal = float3(0, 0, -step.z);
-             }
-             return DDAHit(t_entry + hit_t_offset, hit_normal);
+            // 1) We know the voxel coordinates (voxel.x, voxel.y, voxel.z).
+            float3 voxel_min = box.min + float3(voxel) * cell_size;
+            float3 voxel_max = voxel_min + cell_size;
+
+            // 2) Intersect the ray with the voxel’s bounding box:
+            float t_voxel = RayAabbIntersection(ray, Aabb(voxel_min, voxel_max));
+            if (t_voxel >= 0.0f) {
+                // 3) The normal is whichever face the ray hits on that bounding box.
+                float3 normal = ComputeBoxFaceNormal(ray.origin + ray.direction * t_voxel, voxel_min, voxel_max);
+
+                // Return the intersection distance and normal
+                return DDAHit(t_voxel, normal);
+            }
         }
 
         // Step to next voxel:
@@ -318,11 +323,11 @@ func sample_lambertian(float3 normal, float3 albedo, out float3 out_dir, out flo
 
     float3 radiance = float3(0, 0, 0);
     float3 throughput = float3(1, 1, 1);
-    const int maxBounces = 4;
+    const int max_bounces = 4;
     float3 background = float3(0.1, 0.1, 0.1);
 
     // Path tracing loop: for each bounce, sample the surface and accumulate lighting.
-    for (int bounce = 0; bounce < maxBounces; bounce++)
+    for (int bounce = 0; bounce < max_bounces; bounce++)
     {
         DDAHit hit = DDATraverse(Ray(ray.origin, ray.direction), box, voxel_data);
         if (hit.t < 0.0f)
