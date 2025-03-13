@@ -34,12 +34,16 @@ func RayAabbIntersection(Ray ray, Aabb box) -> float
     return tmax_min > max(tmin_max, 0.0f) ? tmin_max : -1.0f;
 }
 
-// Assume an 8x8x8 grid:
-const int grid_dim = 8;
+struct DDAHit {
+    float t;
+    float3 normal;
+};
 
 // DDA traversal function that returns the distance along the ray when a voxel is hit,
 // or -1.0 if no voxel is hit.
-func DDATraverse(Ray ray, Aabb box, uint* voxel_buffer) -> float {
+func DDATraverse(Ray ray, Aabb box, uint* voxel_buffer) -> DDAHit {
+    // FIXME: assume an 8x8x8 grid:
+    const int grid_dim = 8;
     // Compute cell (voxel) size.
     float3 grid_size = box.max - box.min;
     float3 cell_size = grid_size / float3(grid_dim, grid_dim, grid_dim);
@@ -48,13 +52,11 @@ func DDATraverse(Ray ray, Aabb box, uint* voxel_buffer) -> float {
     float t_entry = RayAabbIntersection(ray, box);
     if (t_entry < 0.0) {
         // Ray misses the grid.
-        return -1.0;
+        return DDAHit(-1.0, float3(0.0));
     }
 
-    return t_entry;
-
     // Compute starting point inside the grid.
-    float3 pos = ray.origin + ray.direction * t_entry;
+    float3 pos = ray.origin + ray.direction * (t_entry );
 
     // Determine initial voxel coordinates.
     int3 voxel;
@@ -103,10 +105,26 @@ func DDATraverse(Ray ray, Aabb box, uint* voxel_buffer) -> float {
 
         // Check occupancy: Here, assume nonzero means "filled".
         if ((voxel_buffer[index >> 5] & (1u << (index & 31))) != 0) {
-            // Return the current t along the ray.
-            // (You could also return the voxel coordinate or any hit info.)
-            // We choose the minimum of tMax components as an approximation.
-            return t_entry + min(tMax.x, min(tMax.y, tMax.z));
+             // Determine which tMax is minimal.
+             float hit_t_offset = min(tMax.x, min(tMax.y, tMax.z));
+             int hit_axis;
+             if (hit_t_offset == tMax.x) {
+                 hit_axis = 0;
+             } else if (hit_t_offset == tMax.y) {
+                 hit_axis = 1;
+             } else {
+                 hit_axis = 2;
+             }
+ 
+             float3 hit_normal;
+             if (hit_axis == 0) {
+                 hit_normal = float3(-step.x, 0, 0);
+             } else if (hit_axis == 1) {
+                 hit_normal = float3(0, -step.y, 0);
+             } else {
+                 hit_normal = float3(0, 0, -step.z);
+             }
+             return DDAHit(t_entry + hit_t_offset, hit_normal);
         }
 
         // Step to next voxel:
@@ -130,7 +148,7 @@ func DDATraverse(Ray ray, Aabb box, uint* voxel_buffer) -> float {
     }
 
     // If we exit the grid without a hit, return -1.
-    return -1.0;
+    return DDAHit(-1.0, float3(0.0));
 }
 
 func ComputeAabbNormal(float3 hit_point, Aabb box) -> float3
@@ -215,9 +233,9 @@ func CalculateLightingArea(float3 hit_point, float3 surface_normal, float3 albed
 
     // Shadow test: cast a ray toward the light sample.
     Ray shadow_ray = Ray(hit_point + surface_normal * 0.001, light_dir);
-    float t_shadow = DDATraverse(shadow_ray, box, voxel_buffer);
+    DDAHit t_shadow = DDATraverse(shadow_ray, box, voxel_buffer);
     // If the shadow ray hits an object before reaching the light sample, block the light.
-    float visibility = (t_shadow > 0.0 && t_shadow < distance) ? 0.0 : 1.0;
+    float visibility = (t_shadow.t > 0.0 && t_shadow.t < distance) ? 0.0 : 1.0;
 
     pdf_light = (1.0 / area_total) * visibility;
 
@@ -306,8 +324,8 @@ func sample_lambertian(float3 normal, float3 albedo, out float3 out_dir, out flo
     // Path tracing loop: for each bounce, sample the surface and accumulate lighting.
     for (int bounce = 0; bounce < maxBounces; bounce++)
     {
-        float t = DDATraverse(Ray(ray.origin, ray.direction), box, voxel_data);
-        if (t < 0.0f)
+        DDAHit hit = DDATraverse(Ray(ray.origin, ray.direction), box, voxel_data);
+        if (hit.t < 0.0f)
         {
             // No hit: add background radiance and terminate.
             radiance += throughput * background;
@@ -317,8 +335,8 @@ func sample_lambertian(float3 normal, float3 albedo, out float3 out_dir, out flo
         // add emissive light
         radiance += throughput * box.emission;
 
-        float3 hit_point = ray.origin + ray.direction * t;
-        float3 normal = ComputeAabbNormal(hit_point, box);
+        float3 hit_point = ray.origin + ray.direction * hit.t;
+        float3 normal = hit.normal;
 
         daxa::f32 pdf_light;
         daxa::f32vec3 light_dir;

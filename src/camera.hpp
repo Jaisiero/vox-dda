@@ -13,7 +13,7 @@ const glm::vec3 INIT_FORWARD = {0, 0, 1};
 const glm::vec3 INIT_CAMERA_POS = {0, 4.5, -5.0};
 const glm::vec3 INIT_CAMERA_UP = {0, 1, 0};
 
-const f32 INIT_CAMERA_FOV = 90.0f;
+const f32 INIT_CAMERA_FOV = 45.0f;
 const f32 INIT_CAMERA_WIDTH = 800.0f;
 const f32 INIT_CAMERA_HEIGHT = 600.0f;
 const f32 INIT_CAMERA_NEAR = 0.001f;
@@ -281,12 +281,12 @@ struct Camera {
         last_mouse_pos = mouse_pos;
     }
 
-    void camera_set_mouse_left_press(bool mouse_left_press) {
-        mouse_left_press = mouse_left_press;
+    void camera_set_mouse_left_press(bool mouse_left) {
+        mouse_left_press = mouse_left;
     }
 
-    void camera_set_mouse_middle_pressed(bool mouse_middle_pressed) {
-        mouse_middle_pressed = mouse_middle_pressed;
+    void camera_set_mouse_middle_pressed(bool mouse_middle) {
+        mouse_middle_pressed = mouse_middle;
     }
 
     void camera_set_defocus_angle(f32 defocus_angle) {

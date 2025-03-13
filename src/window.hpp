@@ -156,29 +156,28 @@ struct AppWindow
 
     inline void on_mouse_button(i32 button, i32 action, f32 x, f32 y)
     {
-        std::cout << "Mouse button: " << button << " action: " << action << " x: " << x << " y: " << y << std::endl;
         if (button == GLFW_MOUSE_BUTTON_1)
         {
             camera.camera_set_last_mouse_pos( glm::vec2(x, y));
             // Click right button store the current mouse position
             if (action == GLFW_PRESS)
             {
-                camera.camera_set_mouse_left_press( true);
+                camera.camera_set_mouse_left_press(true);
             }
             else if (action == GLFW_RELEASE)
             {
-                camera.camera_set_mouse_left_press( false);
+                camera.camera_set_mouse_left_press(false);
             }
         }
         else if (button == GLFW_MOUSE_BUTTON_MIDDLE)
         {
             if (action == GLFW_PRESS)
             {
-                camera.camera_set_mouse_middle_pressed( true);
+                camera.camera_set_mouse_middle_pressed(true);
             }
             else if (action == GLFW_RELEASE)
             {
-                camera.camera_set_mouse_middle_pressed( false);
+                camera.camera_set_mouse_middle_pressed(false);
             }
         }
     }
