@@ -118,7 +118,7 @@ int main(int argc, char const *argv[])
     auto const voxel_size = voxel_dim * voxel_dim * voxel_dim; 
     auto const voxel_buffer_size = voxel_size / sizeof(u32);
 
-    u64 frame_count = 0;
+    u64 frame_index = 0;
 
     auto voxel_buffer = device.create_buffer({
         .size = voxel_buffer_size,
@@ -132,9 +132,20 @@ int main(int argc, char const *argv[])
         .name = "camera buffer",
     });
 
+    daxa::ImageId accumulator_image[3];
+    for(auto& image : accumulator_image)
+        image = device.create_image({
+            .format = swapchain.get_format(),
+            .size = daxa::Extent3D{swapchain.get_surface_extent().x, swapchain.get_surface_extent().y, 1},
+            .usage = daxa::ImageUsageFlagBits::TRANSFER_SRC | daxa::ImageUsageFlagBits::TRANSFER_DST | daxa::ImageUsageFlagBits::SHADER_STORAGE,
+            .name = "accumulator image " + std::to_string(&image - accumulator_image),
+        });
+
     daxa::TaskImage task_swapchain_image = {{.swapchain_image = true, .name = "swapchain image"}};
     daxa::TaskBuffer task_voxel_buffer = {{.initial_buffers = {.buffers = std::array{voxel_buffer}}, .name = "voxel buffer"}};
     daxa::TaskBuffer task_camera_buffer = {{.initial_buffers = {.buffers = std::array{camera_buffer}}, .name = "camera buffer"}};
+    daxa::TaskImage task_accumulation_previous_image = {{.initial_images = {.images = std::array{accumulator_image[0]}}, .name = "accumulation previous image"}};
+    daxa::TaskImage task_accumulation_image = {{.initial_images = {.images = std::array{accumulator_image[1]}}, .name = "accumulation image"}};
 
     auto task_graph_upload = daxa::TaskGraph({
         .device = device,
@@ -175,6 +186,8 @@ int main(int argc, char const *argv[])
         task_graph.use_persistent_image(task_swapchain_image);
         task_graph.use_persistent_buffer(task_voxel_buffer);
         task_graph.use_persistent_buffer(task_camera_buffer);
+        task_graph.use_persistent_image(task_accumulation_previous_image);
+        task_graph.use_persistent_image(task_accumulation_image);
 
         auto& camera = window.camera;
 
@@ -204,17 +217,23 @@ int main(int argc, char const *argv[])
                 daxa::inl_attachment(daxa::TaskImageAccess::COMPUTE_SHADER_STORAGE_READ_WRITE, task_swapchain_image),
                 daxa::inl_attachment(daxa::TaskBufferAccess::COMPUTE_SHADER_READ, task_voxel_buffer),
                 daxa::inl_attachment(daxa::TaskBufferAccess::COMPUTE_SHADER_READ, task_camera_buffer),
+                daxa::inl_attachment(daxa::TaskImageAccess::COMPUTE_SHADER_STORAGE_READ_ONLY, task_accumulation_previous_image),
+                daxa::inl_attachment(daxa::TaskImageAccess::COMPUTE_SHADER_STORAGE_READ_WRITE, task_accumulation_image),
             },
-            .task = [&window, &device, compute_pipeline, task_swapchain_image, task_voxel_buffer, task_camera_buffer, &frame_count](daxa::TaskInterface ti)
+            .task = [&window, &device, compute_pipeline, task_swapchain_image, task_voxel_buffer, task_camera_buffer, task_accumulation_previous_image, task_accumulation_image, &frame_index](daxa::TaskInterface ti)
             {
                 const auto width = window.width;
                 const auto height = window.height;
                 auto p = ComputePush{
                     .cam = device.device_address(ti.get(task_camera_buffer).ids[0]).value(),
                     .res = {width, height},
-                    .frame_count = frame_count++,
+                    .frame_index = frame_index++,
+                    .frame_count = window.frame_count++,
+                    .flags = window.flags,
                     .swapchain = ti.get(task_swapchain_image).ids[0].default_view(),   
                     .voxel_buffer = device.device_address(ti.get(task_voxel_buffer).ids[0]).value(), 
+                    .accumulation_previous_buffer = ti.get(task_accumulation_previous_image).ids[0].default_view(),
+                    .accumulation_buffer = ti.get(task_accumulation_image).ids[0].default_view(),
                 };
                 ti.recorder.set_pipeline(*compute_pipeline);
                 ti.recorder.push_constant(p);
@@ -248,6 +267,16 @@ int main(int argc, char const *argv[])
             swapchain.resize();
             window.swapchain_out_of_date = false;
             std::cout << "Resized swapchain" << std::endl;
+            
+            for(auto& image : accumulator_image)
+                device.destroy_image(image);
+            for(auto& image : accumulator_image)
+                image = device.create_image({
+                    .format = swapchain.get_format(),
+                    .size = daxa::Extent3D{swapchain.get_surface_extent().x, swapchain.get_surface_extent().y, 1},
+                    .usage = daxa::ImageUsageFlagBits::TRANSFER_SRC | daxa::ImageUsageFlagBits::TRANSFER_DST | daxa::ImageUsageFlagBits::SHADER_STORAGE,
+                    .name = "accumulator image " + std::to_string(&image - accumulator_image),
+                });
         }
 
         auto swapchain_image = swapchain.acquire_next_image();
@@ -255,6 +284,9 @@ int main(int argc, char const *argv[])
         if (!swapchain_image.is_empty())
         {
             handle_reload_result(pipeline_manager.reload_all());
+
+            task_accumulation_previous_image.set_images({.images = std::array{accumulator_image[(frame_index + 2) % 3]}});
+            task_accumulation_image.set_images({.images = std::array{accumulator_image[frame_index % 3]}});
     
             // So, now all we need to do is execute our task graph!
             task_graph.execute({});
@@ -270,6 +302,9 @@ int main(int argc, char const *argv[])
     }
     device.wait_idle();
     device.collect_garbage();
+
+    for(auto& image : accumulator_image)
+        device.destroy_image(image);
 
     device.destroy_buffer(voxel_buffer);
     device.destroy_buffer(camera_buffer);

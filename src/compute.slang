@@ -332,14 +332,16 @@ func sample_lambertian(float3 normal, float3 albedo, out float3 out_dir, out flo
         return;
 
     let cam = (CameraView *)(p.cam);
-    let frame_count = p.frame_count;
+    let frame_index = p.frame_index;
     let t_min = 0.0001f;
     let t_max = 10000.0f;
+    let flags = p.flags;
+    let frame_count = p.frame_count;
 
     uint* voxel_data = (uint *)(p.voxel_buffer);
 
     // Initialize a seed based on pixel coordinates (and optionally the frame number)
-    uint seed = init_seed(pixel_i, frame_count);
+    uint seed = init_seed(pixel_i, frame_index);
 
     // Create the initial camera ray.
     RayDesc ray = CreateRay(cam.inv_view, cam.inv_proj, pixel_i, res, t_min, t_max, seed);
@@ -366,15 +368,16 @@ func sample_lambertian(float3 normal, float3 albedo, out float3 out_dir, out flo
         float3 hit_point = ray.origin + ray.direction * hit.t;
         float3 normal = hit.normal;
 
-        daxa::f32 pdf_light;
-        daxa::f32vec3 light_dir;
+        float pdf_light;
+        float3 light_dir;
 
         // FIXME: pass material properties
         float3 albedo = float3(1.0, 0.0, 0.0);
 
         float3 direct_light = CalculateLightingArea(hit_point, normal, albedo, area_light, voxel_data, seed, pdf_light, light_dir);
 
-        if(pdf_light > 0.0f){
+        if(pdf_light > 0.0f) 
+        {
             // MIS: balance the direct and indirect contributions.
             float weight = 1.0f;
             if (bounce > 0)
@@ -394,7 +397,6 @@ func sample_lambertian(float3 normal, float3 albedo, out float3 out_dir, out flo
         ray.origin = hit_point + normal * 0.001f;
         ray.direction = sample_lambertian(normal, albedo, bounce_dir, pdf_brdf, brdf, seed);
 
-        // --- Indirect Bounce ---
         // Assume a diffuse (Lambertian) surface with constant albedo.
         float cos_theta = max(dot(normal, bounce_dir), 0.0f);
         throughput *= brdf * cos_theta / pdf_brdf;
@@ -408,5 +410,27 @@ func sample_lambertian(float3 normal, float3 albedo, out float3 out_dir, out flo
         throughput /= p_rr;
     }
 
-    p.swapchain.get()[pixel_i.xy] = float4(radiance, 1.0f);
+    float3 gamma_corrected_average = 0.0f;
+
+    if((flags & ACCUMULATE_ON_FLAG) != 0) 
+    {
+        // Get the accumulated color
+        let accumulated_color = p.accumulation_previous_buffer.get()[pixel_i.xy];
+
+        // Update the accumulated color by frame_count and add the new radiance
+        let average_radiance = (accumulated_color.rgb * float(frame_count) + radiance) / float(frame_count + 1);
+
+        // Write the averaged color to the accumulation buffer
+        p.accumulation_buffer.get()[pixel_i.xy] = float4(average_radiance, 1.0);
+
+        // Apply gamma correction to the average radiance
+        gamma_corrected_average = pow(average_radiance, float(1.0 / 2.2));
+    }
+    else 
+    {
+        // Apply gamma correction to the radiance
+        gamma_corrected_average = pow(radiance, float(1.0 / 2.2));
+    }
+    
+    p.swapchain.get()[pixel_i.xy] = float4(gamma_corrected_average, 1.0f);
 }

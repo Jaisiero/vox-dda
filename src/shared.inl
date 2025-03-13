@@ -3,6 +3,7 @@
 #include "daxa/daxa.inl"
 
 static daxa::f32 PI = 3.14159265359f;
+static daxa::u32 ACCUMULATE_ON_FLAG = 1 << 0;
 
 #ifdef __cplusplus
 #define VOX_DDA_FUNC void
@@ -102,7 +103,11 @@ struct ComputePush
 {
     daxa_BufferPtr(CameraView) cam;
     daxa_u32vec2 res;
+    daxa_u64 frame_index;
     daxa_u64 frame_count;
+    daxa_u32 flags;
     daxa::RWTexture2DId<daxa_f32vec4> swapchain;
     daxa_BufferPtr(daxa_u32) voxel_buffer;
+    daxa::RWTexture2DId<daxa_f32vec4> accumulation_previous_buffer;
+    daxa::RWTexture2DId<daxa_f32vec4> accumulation_buffer;
 };

@@ -14,6 +14,7 @@ using HWND = void *;
 #define GLFW_EXPOSE_NATIVE_WAYLAND
 #endif
 #include <GLFW/glfw3native.h>
+#include "shared.inl"
 // FIXME: Refactor?
 #include "camera.hpp"
 
@@ -26,6 +27,8 @@ struct AppWindow
     bool unlock_fps = false;
     // FIXME: Refactor?
     Camera camera = {};
+    u64 frame_count = 0;
+    u32 flags = 0;
 
     explicit AppWindow(char const *window_name, u32 sx = 800, u32 sy = 600) : width{sx}, height{sy}
     {
@@ -153,6 +156,9 @@ struct AppWindow
     inline void on_mouse_move(f32 x, f32 y)
     {
         camera.camera_set_mouse_delta(glm::vec2{x, y});
+        if(camera.mouse_left_press) {
+            frame_count = 0;
+        }
     }
 
     inline void on_mouse_button(i32 button, i32 action, f32 x, f32 y)
@@ -192,6 +198,7 @@ struct AppWindow
                 if (action == GLFW_PRESS || action == GLFW_REPEAT)
                 {
                     camera.move_camera_forward();
+                    frame_count = 0;
                 }
                 break;
             case GLFW_KEY_S:
@@ -199,6 +206,7 @@ struct AppWindow
                 if (action == GLFW_PRESS || action == GLFW_REPEAT)
                 {
                     camera.move_camera_backward();
+                    frame_count = 0;
                 }
                 break;
             case GLFW_KEY_A:
@@ -206,6 +214,7 @@ struct AppWindow
                 if (action == GLFW_PRESS || action == GLFW_REPEAT)
                 {
                     camera.move_camera_left();
+                    frame_count = 0;
                 }
                 break;
             case GLFW_KEY_D:
@@ -213,18 +222,21 @@ struct AppWindow
                 if (action == GLFW_PRESS || action == GLFW_REPEAT)
                 {
                     camera.move_camera_right();
+                    frame_count = 0;
                 }
                 break;
             case GLFW_KEY_X:
                 if (action == GLFW_PRESS || action == GLFW_REPEAT)
                 {
                     camera.move_camera_up();
+                    frame_count = 0;
                 }
                 break;
             case GLFW_KEY_Z:
                 if (action == GLFW_PRESS || action == GLFW_REPEAT)
                 {
                     camera.move_camera_down();
+                    frame_count = 0;
                 }
                 break;
             case GLFW_KEY_LEFT_SHIFT:
@@ -247,12 +259,27 @@ struct AppWindow
                 if (action == GLFW_PRESS)
                 {
                     camera.camera_reset_moved();
+                    frame_count = 0;
                 }
                 break;
             case GLFW_KEY_F:
                 if (action == GLFW_PRESS)
                 {
                     unlock_fps = !unlock_fps;
+                }
+                break;
+            case GLFW_KEY_T:
+                if(action == GLFW_PRESS)
+                {
+                    if(flags & ACCUMULATE_ON_FLAG)
+                    {
+                        flags &= ~ACCUMULATE_ON_FLAG;
+                    }
+                    else
+                    {
+                        flags |= ACCUMULATE_ON_FLAG;
+                        frame_count = 0;
+                    }
                 }
                 break;
             default:
