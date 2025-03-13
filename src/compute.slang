@@ -13,7 +13,7 @@ struct RayDesc
 };
 
 // FIXME: pass this as a push constant or buffer
-static Aabb box = Aabb(float3(-3.0, -3.0, -3.0), float3(3.0, 3.0, 3.0), float3(0.0));
+static Aabb box = Aabb(float3(-4.0, -4.0, -4.0), float3(4.0, 4.0, 4.0), float3(0.0));
 static PointLight light = PointLight(float3(5, 5, -5), float3(20, 20, 20));
 static AreaLight area_light = AreaLight(float3(0, 5, 0), float3(0, -1, 0), float3(20, 20, 20), float2(2, 2));
 
@@ -32,6 +32,105 @@ func RayAabbIntersection(Ray ray, Aabb box) -> float
     float tmin_max = max(tmin.x, max(tmin.y, tmin.z));
     float tmax_min = min(tmax.x, min(tmax.y, tmax.z));
     return tmax_min > max(tmin_max, 0.0f) ? tmin_max : -1.0f;
+}
+
+// Assume an 8x8x8 grid:
+const int grid_dim = 8;
+
+// DDA traversal function that returns the distance along the ray when a voxel is hit,
+// or -1.0 if no voxel is hit.
+func DDATraverse(Ray ray, Aabb box, uint* voxel_buffer) -> float {
+    // Compute cell (voxel) size.
+    float3 grid_size = box.max - box.min;
+    float3 cell_size = grid_size / float3(grid_dim, grid_dim, grid_dim);
+
+    // Get the entry point (t_entry) into the AABB.
+    float t_entry = RayAabbIntersection(ray, box);
+    if (t_entry < 0.0) {
+        // Ray misses the grid.
+        return -1.0;
+    }
+
+    return t_entry;
+
+    // Compute starting point inside the grid.
+    float3 pos = ray.origin + ray.direction * t_entry;
+
+    // Determine initial voxel coordinates.
+    int3 voxel;
+    voxel.x = int(clamp(floor((pos.x - box.min.x) / cell_size.x), 0.0, float(grid_dim - 1)));
+    voxel.y = int(clamp(floor((pos.y - box.min.y) / cell_size.y), 0.0, float(grid_dim - 1)));
+    voxel.z = int(clamp(floor((pos.z - box.min.z) / cell_size.z), 0.0, float(grid_dim - 1)));
+
+    // Compute the step direction.
+    int3 step;
+    step.x = (ray.direction.x >= 0.0) ? 1 : -1;
+    step.y = (ray.direction.y >= 0.0) ? 1 : -1;
+    step.z = (ray.direction.z >= 0.0) ? 1 : -1;
+
+    // Compute tDelta: distance along ray to cross one cell.
+    float3 tDelta;
+    tDelta.x = (ray.direction.x != 0.0) ? cell_size.x / abs(ray.direction.x) : 1e10;
+    tDelta.y = (ray.direction.y != 0.0) ? cell_size.y / abs(ray.direction.y) : 1e10;
+    tDelta.z = (ray.direction.z != 0.0) ? cell_size.z / abs(ray.direction.z) : 1e10;
+
+    // Compute tMax: distance along ray to first voxel boundary.
+    float3 voxel_boundary;
+    if (step.x > 0)
+        voxel_boundary.x = box.min.x + (voxel.x + 1) * cell_size.x;
+    else
+        voxel_boundary.x = box.min.x + (voxel.x) * cell_size.x;
+    if (step.y > 0)
+        voxel_boundary.y = box.min.y + (voxel.y + 1) * cell_size.y;
+    else
+        voxel_boundary.y = box.min.y + (voxel.y) * cell_size.y;
+    if (step.z > 0)
+        voxel_boundary.z = box.min.z + (voxel.z + 1) * cell_size.z;
+    else
+        voxel_boundary.z = box.min.z + (voxel.z) * cell_size.z;
+
+    float3 tMax;
+    tMax.x = (ray.direction.x != 0.0) ? (voxel_boundary.x - pos.x) / ray.direction.x : 1e10;
+    tMax.y = (ray.direction.y != 0.0) ? (voxel_boundary.y - pos.y) / ray.direction.y : 1e10;
+    tMax.z = (ray.direction.z != 0.0) ? (voxel_boundary.z - pos.z) / ray.direction.z : 1e10;
+
+    // Loop through the voxel grid.
+    while ( (voxel.x >= 0 && voxel.x < grid_dim) &&
+            (voxel.y >= 0 && voxel.y < grid_dim) &&
+            (voxel.z >= 0 && voxel.z < grid_dim) ) {
+        // Compute 1D index from 3D voxel coordinate.
+        let index = voxel.z * grid_dim * grid_dim + voxel.y * grid_dim + voxel.x;
+
+        // Check occupancy: Here, assume nonzero means "filled".
+        if ((voxel_buffer[index >> 5] & (1u << (index & 31))) != 0) {
+            // Return the current t along the ray.
+            // (You could also return the voxel coordinate or any hit info.)
+            // We choose the minimum of tMax components as an approximation.
+            return t_entry + min(tMax.x, min(tMax.y, tMax.z));
+        }
+
+        // Step to next voxel:
+        if (tMax.x < tMax.y) {
+            if (tMax.x < tMax.z) {
+                voxel.x += step.x;
+                tMax.x += tDelta.x;
+            } else {
+                voxel.z += step.z;
+                tMax.z += tDelta.z;
+            }
+        } else {
+            if (tMax.y < tMax.z) {
+                voxel.y += step.y;
+                tMax.y += tDelta.y;
+            } else {
+                voxel.z += step.z;
+                tMax.z += tDelta.z;
+            }
+        }
+    }
+
+    // If we exit the grid without a hit, return -1.
+    return -1.0;
 }
 
 func ComputeAabbNormal(float3 hit_point, Aabb box) -> float3
@@ -67,20 +166,6 @@ func CreateRay(daxa_f32mat4x4 inv_view, daxa_f32mat4x4 inv_proj, daxa_u32vec2 th
     return ray;
 }
 
-func CalculateLighting(float3 hit_point, float3 normal, PointLight light) -> float3
-{
-    // Here we compute a direct lighting contribution from the point light.
-    float3 light_dir = normalize(light.position - hit_point);
-    float diff = max(dot(normal, light_dir), 0.0f);
-    float distance = length(light.position - hit_point);
-    float attenuation = 1.0f / (distance * distance);
-    // Cast a shadow ray to check if the light is visible.
-    Ray shadow_ray = Ray(hit_point + normal * 0.001f, light_dir);
-    float shadow_t = RayAabbIntersection(shadow_ray, box);
-    float direct = (shadow_t < 0.0f) ? 1.0f : 0.0f;
-    return light.emission * diff * attenuation * direct;
-}
-
 func AreaLightSample(AreaLight area_light, inout uint seed, out float3 light_normal) -> float3{
     // Compute an orthonormal basis for the area light's plane.
     light_normal = normalize(area_light.normal);
@@ -100,7 +185,7 @@ func AreaLightSample(AreaLight area_light, inout uint seed, out float3 light_nor
                         + bitangent * (v * area_light.size.y);
 }
 
-func CalculateLightingArea(float3 hit_point, float3 surface_normal, float3 albedo, AreaLight area_light, inout uint seed, out float pdf_light, out float3 light_dir) -> float3 {
+func CalculateLightingArea(float3 hit_point, float3 surface_normal, float3 albedo, AreaLight area_light, uint* voxel_buffer, inout uint seed, out float pdf_light, out float3 light_dir) -> float3 {
     
     pdf_light = 0.0f;
 
@@ -130,7 +215,7 @@ func CalculateLightingArea(float3 hit_point, float3 surface_normal, float3 albed
 
     // Shadow test: cast a ray toward the light sample.
     Ray shadow_ray = Ray(hit_point + surface_normal * 0.001, light_dir);
-    float t_shadow = RayAabbIntersection(shadow_ray, box);
+    float t_shadow = DDATraverse(shadow_ray, box, voxel_buffer);
     // If the shadow ray hits an object before reaching the light sample, block the light.
     float visibility = (t_shadow > 0.0 && t_shadow < distance) ? 0.0 : 1.0;
 
@@ -205,6 +290,8 @@ func sample_lambertian(float3 normal, float3 albedo, out float3 out_dir, out flo
     let t_min = 0.0001f;
     let t_max = 10000.0f;
 
+    uint* voxel_data = (uint *)(p.voxel_buffer);
+
     // Initialize a seed based on pixel coordinates (and optionally the frame number)
     uint seed = init_seed(pixel_i, frame_count);
 
@@ -219,7 +306,7 @@ func sample_lambertian(float3 normal, float3 albedo, out float3 out_dir, out flo
     // Path tracing loop: for each bounce, sample the surface and accumulate lighting.
     for (int bounce = 0; bounce < maxBounces; bounce++)
     {
-        float t = RayAabbIntersection(Ray(ray.origin, ray.direction), box);
+        float t = DDATraverse(Ray(ray.origin, ray.direction), box, voxel_data);
         if (t < 0.0f)
         {
             // No hit: add background radiance and terminate.
@@ -239,7 +326,7 @@ func sample_lambertian(float3 normal, float3 albedo, out float3 out_dir, out flo
         // FIXME: pass material properties
         float3 albedo = float3(1.0, 0.0, 0.0);
 
-        float3 direct_light = CalculateLightingArea(hit_point, normal, albedo, area_light, seed, pdf_light, light_dir);
+        float3 direct_light = CalculateLightingArea(hit_point, normal, albedo, area_light, voxel_data, seed, pdf_light, light_dir);
 
         if(pdf_light > 0.0f){
             // MIS: balance the direct and indirect contributions.

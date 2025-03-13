@@ -192,6 +192,7 @@ int main(int argc, char const *argv[])
                 ti.recorder.copy_buffer_to_buffer({
                     .src_buffer = ti.allocator->buffer(),
                     .dst_buffer = ti.get(task_camera_buffer).ids[0],
+                    .src_offset = staging.buffer_offset,
                     .size = staging.size,
                 });
             },
@@ -213,7 +214,7 @@ int main(int argc, char const *argv[])
                     .res = {width, height},
                     .frame_count = frame_count++,
                     .swapchain = ti.get(task_swapchain_image).ids[0].default_view(),   
-                    .voxel_buffer = ti.get(task_voxel_buffer).ids[0], 
+                    .voxel_buffer = device.device_address(ti.get(task_voxel_buffer).ids[0]).value(), 
                 };
                 ti.recorder.set_pipeline(*compute_pipeline);
                 ti.recorder.push_constant(p);

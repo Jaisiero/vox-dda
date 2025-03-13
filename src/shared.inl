@@ -104,5 +104,5 @@ struct ComputePush
     daxa_u32vec2 res;
     daxa_u64 frame_count;
     daxa::RWTexture2DId<daxa_f32vec4> swapchain;
-    daxa::BufferId voxel_buffer;
+    daxa_BufferPtr(daxa_u32) voxel_buffer;
 };

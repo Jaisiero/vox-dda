@@ -10,7 +10,7 @@
 using namespace daxa::types;
 
 const glm::vec3 INIT_FORWARD = {0, 0, 1};
-const glm::vec3 INIT_CAMERA_POS = {0, 0, -5.0};
+const glm::vec3 INIT_CAMERA_POS = {0, 4.5, -5.0};
 const glm::vec3 INIT_CAMERA_UP = {0, 1, 0};
 
 const f32 INIT_CAMERA_FOV = 90.0f;
