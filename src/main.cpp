@@ -264,7 +264,7 @@ int main(int argc, char const *argv[])
         // Sleep to enforce FPS if the frame finished early.
         auto frame_end = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(frame_end - frame_start);
-        if (elapsed < fixed_frame_duration) {
+        if (elapsed < fixed_frame_duration && !window.unlock_fps) {
             std::this_thread::sleep_for(fixed_frame_duration - elapsed);
         }
     }

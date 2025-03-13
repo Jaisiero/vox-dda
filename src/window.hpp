@@ -23,6 +23,7 @@ struct AppWindow
     u32 width, height;
     bool minimized = false;
     bool swapchain_out_of_date = false;
+    bool unlock_fps = false;
     // FIXME: Refactor?
     Camera camera = {};
 
@@ -234,6 +235,24 @@ struct AppWindow
                 else if (action == GLFW_RELEASE)
                 {
                     camera.camera_shift_released();
+                }
+                break;
+            case GLFW_KEY_ESCAPE:
+                if (action == GLFW_PRESS)
+                {
+                    glfwSetWindowShouldClose(glfw_window_ptr, GLFW_TRUE);
+                }
+                break;
+            case GLFW_KEY_R:
+                if (action == GLFW_PRESS)
+                {
+                    camera.camera_reset_moved();
+                }
+                break;
+            case GLFW_KEY_F:
+                if (action == GLFW_PRESS)
+                {
+                    unlock_fps = !unlock_fps;
                 }
                 break;
             default:
