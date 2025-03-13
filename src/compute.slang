@@ -34,9 +34,9 @@ func RayAabbIntersection(Ray ray, Aabb box) -> float
     return tmax_min > max(tmin_max, 0.0f) ? tmin_max : -1.0f;
 }
 
-func ComputeBoxFaceNormal(float3 hit_point, float3 box_min, float3 box_max) -> float3
+func ComputeBoxFaceNormal(float3 hit_point, Aabb aabb) -> float3
 {
-    float3 d = hit_point - BoxCenter(Aabb(box_min, box_max));
+    float3 d = hit_point - BoxCenter(aabb);
     float3 abs_d = abs(d);
     if (abs_d.x >= abs_d.y && abs_d.x >= abs_d.z)
         return float3(sign(d.x), 0, 0);
@@ -82,13 +82,13 @@ func DDATraverse(Ray ray, Aabb box, uint* voxel_buffer) -> DDAHit {
     step.y = (ray.direction.y >= 0.0) ? 1 : -1;
     step.z = (ray.direction.z >= 0.0) ? 1 : -1;
 
-    // Compute tDelta: distance along ray to cross one cell.
-    float3 tDelta;
-    tDelta.x = (ray.direction.x != 0.0) ? cell_size.x / abs(ray.direction.x) : 1e10;
-    tDelta.y = (ray.direction.y != 0.0) ? cell_size.y / abs(ray.direction.y) : 1e10;
-    tDelta.z = (ray.direction.z != 0.0) ? cell_size.z / abs(ray.direction.z) : 1e10;
+    // Compute t_delta: distance along ray to cross one cell.
+    float3 t_delta;
+    t_delta.x = (ray.direction.x != 0.0) ? cell_size.x / abs(ray.direction.x) : 1e10;
+    t_delta.y = (ray.direction.y != 0.0) ? cell_size.y / abs(ray.direction.y) : 1e10;
+    t_delta.z = (ray.direction.z != 0.0) ? cell_size.z / abs(ray.direction.z) : 1e10;
 
-    // Compute tMax: distance along ray to first voxel boundary.
+    // Compute t_max: distance along ray to first voxel boundary.
     float3 voxel_boundary;
     if (step.x > 0)
         voxel_boundary.x = box.min.x + (voxel.x + 1) * cell_size.x;
@@ -103,10 +103,10 @@ func DDATraverse(Ray ray, Aabb box, uint* voxel_buffer) -> DDAHit {
     else
         voxel_boundary.z = box.min.z + (voxel.z) * cell_size.z;
 
-    float3 tMax;
-    tMax.x = (ray.direction.x != 0.0) ? (voxel_boundary.x - pos.x) / ray.direction.x : 1e10;
-    tMax.y = (ray.direction.y != 0.0) ? (voxel_boundary.y - pos.y) / ray.direction.y : 1e10;
-    tMax.z = (ray.direction.z != 0.0) ? (voxel_boundary.z - pos.z) / ray.direction.z : 1e10;
+    float3 t_max;
+    t_max.x = (ray.direction.x != 0.0) ? (voxel_boundary.x - pos.x) / ray.direction.x : 1e10;
+    t_max.y = (ray.direction.y != 0.0) ? (voxel_boundary.y - pos.y) / ray.direction.y : 1e10;
+    t_max.z = (ray.direction.z != 0.0) ? (voxel_boundary.z - pos.z) / ray.direction.z : 1e10;
 
     // Loop through the voxel grid.
     while ( (voxel.x >= 0 && voxel.x < grid_dim) &&
@@ -125,7 +125,7 @@ func DDATraverse(Ray ray, Aabb box, uint* voxel_buffer) -> DDAHit {
             float t_voxel = RayAabbIntersection(ray, Aabb(voxel_min, voxel_max));
             if (t_voxel >= 0.0f) {
                 // 3) The normal is whichever face the ray hits on that bounding box.
-                float3 normal = ComputeBoxFaceNormal(ray.origin + ray.direction * t_voxel, voxel_min, voxel_max);
+                float3 normal = ComputeBoxFaceNormal(ray.origin + ray.direction * t_voxel, Aabb(voxel_min, voxel_max));
 
                 // Return the intersection distance and normal
                 return DDAHit(t_voxel, normal);
@@ -133,39 +133,27 @@ func DDATraverse(Ray ray, Aabb box, uint* voxel_buffer) -> DDAHit {
         }
 
         // Step to next voxel:
-        if (tMax.x < tMax.y) {
-            if (tMax.x < tMax.z) {
+        if (t_max.x < t_max.y) {
+            if (t_max.x < t_max.z) {
                 voxel.x += step.x;
-                tMax.x += tDelta.x;
+                t_max.x += t_delta.x;
             } else {
                 voxel.z += step.z;
-                tMax.z += tDelta.z;
+                t_max.z += t_delta.z;
             }
         } else {
-            if (tMax.y < tMax.z) {
+            if (t_max.y < t_max.z) {
                 voxel.y += step.y;
-                tMax.y += tDelta.y;
+                t_max.y += t_delta.y;
             } else {
                 voxel.z += step.z;
-                tMax.z += tDelta.z;
+                t_max.z += t_delta.z;
             }
         }
     }
 
     // If we exit the grid without a hit, return -1.
     return DDAHit(-1.0, float3(0.0));
-}
-
-func ComputeAabbNormal(float3 hit_point, Aabb box) -> float3
-{
-    float3 d = hit_point - BoxCenter(box);
-    float3 abs_d = abs(d);
-    if (abs_d.x >= abs_d.y && abs_d.x >= abs_d.z)
-        return float3(sign(d.x), 0, 0);
-    else if (abs_d.y >= abs_d.z)
-        return float3(0, sign(d.y), 0);
-    else
-        return float3(0, 0, sign(d.z));
 }
 
 func CreateRay(daxa_f32mat4x4 inv_view, daxa_f32mat4x4 inv_proj, daxa_u32vec2 thread_idx, daxa_u32vec2 rt_size, daxa_f32 tmin, daxa_f32 tmax, inout uint seed) -> RayDesc
