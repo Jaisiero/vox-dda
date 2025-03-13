@@ -34,6 +34,39 @@ func RayAabbIntersection(Ray ray, Aabb box) -> float
     return tmax_min > max(tmin_max, 0.0f) ? tmin_max : -1.0f;
 }
 
+// Returns (t_entry, t_exit) for the ray–AABB intersection.
+// If the ray does not intersect, returns float2(-1, -1).
+func RayAabbIntersectionRange(Ray ray, Aabb box) -> float2
+{
+    float3 inv_dir = 1.0f / ray.direction;
+    float3 t0 = (box.min - ray.origin) * inv_dir;
+    float3 t1 = (box.max - ray.origin) * inv_dir;
+
+    float3 tmin = min(t0, t1);
+    float3 tmax = max(t0, t1);
+
+    float t_entry = max(tmin.x, max(tmin.y, tmin.z));
+    float t_exit  = min(tmax.x, min(tmax.y, tmax.z));
+
+    // If t_exit < 0, the entire box is behind the ray.
+    if (t_exit < 0.0f) {
+        return float2(-1.0f, -1.0f);
+    }
+
+    // If the ray starts inside the box, t_entry can be negative.
+    // Clamp it to 0 so we start "now."
+    if (t_entry < 0.0f) {
+        t_entry = 0.0f;
+    }
+
+    // If after clamping t_entry we still have t_entry > t_exit, no intersection.
+    if (t_entry > t_exit) {
+        return float2(-1.0f, -1.0f);
+    }
+
+    return float2(t_entry, t_exit);
+}
+
 func ComputeBoxFaceNormal(float3 hit_point, Aabb aabb) -> float3
 {
     float3 d = hit_point - BoxCenter(aabb);
@@ -61,7 +94,9 @@ func DDATraverse(Ray ray, Aabb box, uint* voxel_buffer) -> DDAHit {
     float3 cell_size = grid_size / float3(grid_dim, grid_dim, grid_dim);
 
     // Get the entry point (t_entry) into the AABB.
-    float t_entry = RayAabbIntersection(ray, box);
+    float2 t_range = RayAabbIntersectionRange(ray, box);
+    float t_entry = t_range.x;
+    float t_exit = t_range.y;
     if (t_entry < 0.0) {
         // Ray misses the grid.
         return DDAHit(-1.0, float3(0.0));
